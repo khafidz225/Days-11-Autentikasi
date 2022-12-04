@@ -1,4 +1,7 @@
 .navbar{
+    width: 100%;
+}
+.navbar-content{
     width: 85%;
     margin: auto;   
 }

@@ -29,7 +29,7 @@ func main() {
 	route.HandleFunc("/project", project).Methods("GET")
 	route.HandleFunc("/contact", contact).Methods("GET")
 	route.HandleFunc("/project-detail/{id}", projectDetail).Methods("GET")
-	route.HandleFunc("/add-project", addProjects).Methods("POST")
+	route.HandleFunc("/add-project", formAddProjects).Methods("POST")
 	route.HandleFunc("/delete-project/{index}", deleteProjects).Methods("GET")
 	route.HandleFunc("/edit-project/{in}", editProject).Methods("GET")
 	route.HandleFunc("/edit-project/{in}", formEditProject).Methods("POST")
@@ -76,52 +76,6 @@ type Project struct {
 
 var Data = Project{
 	TitleSessions: "Personal Web",
-}
-
-func addProjects(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	title := r.PostForm.Get("title")
-	description := r.PostForm.Get("description")
-	startDate := r.PostForm.Get("startdate")
-	endDate := r.PostForm.Get("enddate")
-
-	//Checkbock Technologies
-	nodejs := r.PostForm.Get("nodejs")
-	reactjs := r.PostForm.Get("reactjs")
-	javascript := r.PostForm.Get("javascript")
-	typescript := r.PostForm.Get("typescript")
-
-	checked := []string{
-		nodejs,
-		reactjs,
-		javascript,
-		typescript,
-	}
-
-	_, errQuery := connection.Conn.Exec(context.Background(), "INSERT INTO public.tb_projects(title, start_date, end_date, description, technologies) VALUES($1, $2, $3, $4, $5)", title, startDate, endDate, description, checked)
-
-	if errQuery != nil {
-		fmt.Println("Message : " + errQuery.Error())
-		return
-	}
-
-	// var newProject = Project{
-	// 	Title:       title,
-	// 	Description: description,
-	// 	StartDate:   startDate,
-	// 	EndDate:     endDate,
-	// }
-
-	// Untuk Push ke Array projects
-	// projects = append(projects, newProject)
-	fmt.Println(startDate)
-	fmt.Println(endDate)
-
-	http.Redirect(w, r, "/", http.StatusMovedPermanently)
 }
 
 func home(w http.ResponseWriter, r *http.Request) {
@@ -187,8 +141,17 @@ func home(w http.ResponseWriter, r *http.Request) {
 		each.FormatStartDate = each.StartDate.Format("2 January 2006")
 		each.FormatEndDate = each.EndDate.Format("2 January 2006")
 
-		result = append(result, each)
+		var store = sessions.NewCookieStore([]byte("SESSIONS_ID"))
+		session, _ := store.Get(r, "SESSIONS_ID")
 
+		if session.Values["IsLogin"] != true {
+			each.IsLogin = false
+		} else {
+			each.IsLogin = session.Values["IsLogin"].(bool)
+			each.UserName = session.Values["Names"].(string)
+		}
+
+		result = append(result, each)
 	}
 
 	//sessions
@@ -202,10 +165,9 @@ func home(w http.ResponseWriter, r *http.Request) {
 		Data.UserName = session.Values["Names"].(string)
 	}
 
-	fm := session.Flashes("Message")
+	fm := session.Flashes("message")
 
 	var flashes []string
-
 	if len(fm) > 0 {
 
 		session.Save(r, w)
@@ -217,12 +179,48 @@ func home(w http.ResponseWriter, r *http.Request) {
 
 	Data.FlashData = strings.Join(flashes, "")
 
+	fmt.Println(Data.FlashData)
+
 	resData := map[string]interface{}{
 		"Projects": result,
 		"Data":     Data,
 	}
 	tmpt.Execute(w, resData)
 
+}
+
+func formAddProjects(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	title := r.PostForm.Get("title")
+	description := r.PostForm.Get("description")
+	startDate := r.PostForm.Get("startdate")
+	endDate := r.PostForm.Get("enddate")
+
+	//Checkbock Technologies
+	nodejs := r.PostForm.Get("nodejs")
+	reactjs := r.PostForm.Get("reactjs")
+	javascript := r.PostForm.Get("javascript")
+	typescript := r.PostForm.Get("typescript")
+
+	checked := []string{
+		nodejs,
+		reactjs,
+		javascript,
+		typescript,
+	}
+
+	_, errQuery := connection.Conn.Exec(context.Background(), "INSERT INTO public.tb_projects(title, start_date, end_date, description, technologies) VALUES($1, $2, $3, $4, $5)", title, startDate, endDate, description, checked)
+
+	if errQuery != nil {
+		fmt.Println("Message : " + errQuery.Error())
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusMovedPermanently)
 }
 
 func projectDetail(w http.ResponseWriter, r *http.Request) {
@@ -240,15 +238,68 @@ func projectDetail(w http.ResponseWriter, r *http.Request) {
 
 	var ProjectDetail = Project{}
 
-	err = connection.Conn.QueryRow(context.Background(), "SELECT id, title, start_date, end_date, description FROM tb_projects WHERE id = $1", id).Scan(&ProjectDetail.Id, &ProjectDetail.Title, &ProjectDetail.StartDate, &ProjectDetail.EndDate, &ProjectDetail.Description)
+	err = connection.Conn.QueryRow(context.Background(), "SELECT id, title, start_date, end_date, description, technologies FROM tb_projects WHERE id = $1", id).Scan(&ProjectDetail.Id, &ProjectDetail.Title, &ProjectDetail.StartDate, &ProjectDetail.EndDate, &ProjectDetail.Description, &ProjectDetail.Technologies)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Message2: " + err.Error()))
 	}
 
-	ProjectDetail.FormatStartDate = ProjectDetail.StartDate.Format("2 january 2006")
-	ProjectDetail.FormatEndDate = ProjectDetail.EndDate.Format("2 january 2006")
+	// Time
+	diff := ProjectDetail.EndDate.Sub(ProjectDetail.StartDate)
+	days := diff.Hours() / 24
+	mount := math.Floor(diff.Hours() / 24 / 30)
+
+	dy := strconv.FormatFloat(days, 'f', 0, 64)
+	mo := strconv.FormatFloat(mount, 'f', 0, 64)
+
+	if days < 30 {
+		ProjectDetail.Duration = dy + " Days"
+	} else if days > 30 {
+		ProjectDetail.Duration = mo + " Month"
+	}
+
+	// Technologies
+	ProjectDetail.NodeJs = ""
+	ProjectDetail.ReactJs = ""
+	ProjectDetail.JavaScript = ""
+	ProjectDetail.TypeScript = ""
+
+	if ProjectDetail.Technologies[0] == "true" {
+		ProjectDetail.NodeJs = "/public/img/nodejs.png"
+	} else {
+		ProjectDetail.NodeJs = "d-none"
+	}
+
+	if ProjectDetail.Technologies[1] == "true" {
+		ProjectDetail.ReactJs = "/public/img/reactjs.png"
+	} else {
+		ProjectDetail.ReactJs = "d-none"
+	}
+
+	if ProjectDetail.Technologies[2] == "true" {
+		ProjectDetail.JavaScript = "/public/img/javaScript.png"
+	} else {
+		ProjectDetail.JavaScript = "d-none"
+	}
+	if ProjectDetail.Technologies[3] == "true" {
+		ProjectDetail.TypeScript = "/public/img/typeScript.png"
+	} else {
+		ProjectDetail.TypeScript = "d-none"
+	}
+
+	var store = sessions.NewCookieStore([]byte("SESSIONS_ID"))
+	session, _ := store.Get(r, "SESSIONS_ID")
+
+	if session.Values["IsLogin"] != true {
+		ProjectDetail.IsLogin = false
+	} else {
+		ProjectDetail.IsLogin = session.Values["IsLogin"].(bool)
+		ProjectDetail.UserName = session.Values["Names"].(string)
+	}
+
+	ProjectDetail.FormatStartDate = ProjectDetail.StartDate.Format("2 January 2006")
+	ProjectDetail.FormatEndDate = ProjectDetail.EndDate.Format("2 January 2006")
 
 	dataDetail := map[string]interface{}{
 		"Project": ProjectDetail,
@@ -267,7 +318,35 @@ func project(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Message : " + err.Error()))
 		return
 	}
-	tmpt.Execute(w, nil)
+	var store = sessions.NewCookieStore([]byte("SESSIONS_ID"))
+	session, _ := store.Get(r, "SESSIONS_ID")
+
+	if session.Values["IsLogin"] != true {
+		Data.IsLogin = false
+	} else {
+		Data.IsLogin = session.Values["IsLogin"].(bool)
+		Data.UserName = session.Values["Names"].(string)
+	}
+
+	fm := session.Flashes("message")
+
+	var flashes []string
+
+	if len(fm) > 0 {
+		session.Save(r, w)
+
+		for _, fl := range fm {
+			flashes = append(flashes, fl.(string))
+		}
+	}
+
+	Data.FlashData = strings.Join(flashes, "")
+
+	Data := map[string]interface{}{
+		"DataFlash": Data,
+		// "DataFlash": DataFlash,
+	}
+	tmpt.Execute(w, Data)
 }
 
 func editProject(w http.ResponseWriter, r *http.Request) {
@@ -282,11 +361,20 @@ func editProject(w http.ResponseWriter, r *http.Request) {
 
 	var EditProject = Project{}
 
-	errQuery := connection.Conn.QueryRow(context.Background(), "SELECT id, title, start_date, end_date, description FROM public.tb_projects WHERE id = $1", in).Scan(&EditProject.Id, &EditProject.Title, &EditProject.StartDate, &EditProject.EndDate, &EditProject.Description)
+	errQuery := connection.Conn.QueryRow(context.Background(), "SELECT id, title, start_date, end_date, description, technologies FROM public.tb_projects WHERE id = $1", in).Scan(&EditProject.Id, &EditProject.Title, &EditProject.StartDate, &EditProject.EndDate, &EditProject.Description, &EditProject.Technologies)
 
 	if errQuery != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("message : " + err.Error()))
+	}
+	var store = sessions.NewCookieStore([]byte("SESSIONS_ID"))
+	session, _ := store.Get(r, "SESSIONS_ID")
+
+	if session.Values["IsLogin"] != true {
+		EditProject.IsLogin = false
+	} else {
+		EditProject.IsLogin = session.Values["IsLogin"].(bool)
+		EditProject.UserName = session.Values["Names"].(string)
 	}
 
 	dataEdit := map[string]interface{}{
@@ -311,7 +399,20 @@ func formEditProject(w http.ResponseWriter, r *http.Request) {
 	startDate := r.PostForm.Get("startdate")
 	endDate := r.PostForm.Get("enddate")
 
-	_, errQuery := connection.Conn.Exec(context.Background(), "UPDATE public.tb_projects SET title=$1, start_date=$2, end_date=$3, description=$4 WHERE id=$5;", title, startDate, endDate, description, in)
+	//Checkbock Technologies
+	nodejs := r.PostForm.Get("nodejs")
+	reactjs := r.PostForm.Get("reactjs")
+	javascript := r.PostForm.Get("javascript")
+	typescript := r.PostForm.Get("typescript")
+
+	checked := []string{
+		nodejs,
+		reactjs,
+		javascript,
+		typescript,
+	}
+
+	_, errQuery := connection.Conn.Exec(context.Background(), "UPDATE public.tb_projects SET title=$1, start_date=$2, end_date=$3, description=$4, technologies=$5 WHERE id=$6;", title, startDate, endDate, description, checked, in)
 
 	if errQuery != nil {
 		fmt.Println("Message : " + errQuery.Error())
@@ -345,7 +446,23 @@ func contact(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Message : " + err.Error()))
 		return
 	}
-	tmpt.Execute(w, nil)
+
+	var each = Project{}
+	//sessions
+	var store = sessions.NewCookieStore([]byte("SESSIONS_ID"))
+	session, _ := store.Get(r, "SESSIONS_ID")
+
+	if session.Values["IsLogin"] != true {
+		each.IsLogin = false
+	} else {
+		each.IsLogin = session.Values["IsLogin"].(bool)
+		each.UserName = session.Values["Names"].(string)
+	}
+
+	dataLog := map[string]interface{}{
+		"Project": each,
+	}
+	tmpt.Execute(w, dataLog)
 }
 
 func formRegister(w http.ResponseWriter, r *http.Request) {
@@ -438,7 +555,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	session.Values["Names"] = user.Name
 	session.Options.MaxAge = 10800 //3Hours
 
-	session.AddFlash("Sueccessfully login", "message")
+	session.AddFlash("Successfully Login", "message")
 	session.Save(r, w)
 
 	http.Redirect(w, r, "/", http.StatusMovedPermanently)
